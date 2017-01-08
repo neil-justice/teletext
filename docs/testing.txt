@@ -1,0 +1,111 @@
+1. Testing Approach
+
+1.1 Testing framework
+
+At the beginning of the development process,  I decided I wanted to automate as much testing as I could, including the display testing if possible.  I researched the various unit testing frameworks available for use with C, and decided that the larger more comprehensive ones (such as Cunit) were too powerful for my needs.  I also looked at minimalist frameworks such as MinUnit (http://www.jera.com/techinfo/jtns/jtn002.html), which is 4 lines of C code - but I decided that if I were to use such a small framework I may as well do it myself.
+
+However, I decided that if I ever needed any more advanced functionalities than I was comfortable with creating myself, I would switch over to a  pre-existing framework.  In the end this wasn't necessary, although I almost decided to when trying to test functions such as openFile, which will exit if passed an invalid filename.  In order to test this functionality I needed to be able to replace the exit call during testing, but not during normal running. 
+
+1.2 Function mocking
+
+My solution to this was to use a preprocessor macro like this in the header files cell.h and state.h:
+  #ifdef TESTING
+  #define throwError(e, s) mock_throwError(e, s)
+  #endif
+In order to keep the module dependency tree linear, the functions throwError and mock_throwError are defined in the error module (error.c and error.h).  The module dependency tree is as follows:
+[test/teletext/extension]--display--cell--state--error--base
+The test, teletext and extension modules all contain a main function, and only one is ever included in compilation at once (extension also includes other modules - see docs/extension.txt).  Which one is included depends on the make command ran ("make", "make test", and "make ext" are the relevant commands - "make test" also contains the string "-D TESTING", which activates the throwError preprocessor replacement.  There is also "make fontwriter", which builds the font writing program I wrote to create the sixel fonts m7cont.fnt and m7sep.fnt, which are stored in the files directory).
+
+The function mock_throwError has the same inputs and outputs as the function throwError, but instead of printing a message to stderr (and exiting if errorType == fatal), mock_throwError prints the same message to a file (errorlog.txt - see section 3 below), along with a string to indicate if the errorType was fatal.  This file can then be checked by test functions to see what the program would have done when run in normal mode.
+  
+1.3 Test module documentation
+
+The testing framework I created for this project is quite simple.  As well as the mocking functionality I covered above, the most important component of the framework is this function wrapper:
+  void runTest(testtracker *tracker, char *testidentifier, test t)
+
+The first argument is a pointer to a struct which simply tracks the results of any test run by a wrapper to which it has been passed.  The second argument takes a string which is printed to stdout along with a pass/fail/error notification during the test process.  The third argument is a typedef'ed function pointer to a function of format:
+  result <function name>(void)
+  
+Where "result" is a typedef'ed enumerated type defined as follows:
+  typedef enum result { fail, pass, error } result;
+
+(The error result is only produced when a file needed for the test is missing or the test fails for a different reason)
+
+The wrapper runs the test t, prints the string "testidentifier" and a pass/fail/error result, alters the testtracker as necessary, and returns.
+
+The main function simply declares and initialises a testtracker, calls a series of runTests, and then prints a total of pass/fail/error results.
+
+In order to run the program in test mode, an executable must be made using the "make test" command.
+
+2. Test Documentation
+
+In this section I will explain some of the more interesting tests I have written.  While the majority of tests are fairly basic, and their inner workings can be easily grasped by reading them, some are more complicated.  The more basic ones I will cover by module.
+
+2.1 State module unit tests
+
+The state module is responsible for reading input and assigning attributes (such as "red alphanumeric", "separate graphics", "double height", and so on) to cells.  Its functions are generally tested by attempting to assign an attribute to a cell within the test function's scope, and then checking the cell to see if it is in the correct state.  This way every function in the module is known to behave as expected.
+
+2.1.1 test_readCodesFromFile
+
+This test checks that files are being read correctly.  It compares the input read from testfiles/test.m7 with the 2D array stored in testfiledata.h.  This contains a 2D array of 8-bit unsigned integers read from test.m7 using the Linux terminal command "xxd -i" and edited using find-replace macros. 
+
+2.2 Cell module unit tests
+
+The cell module is responsible for reading the font files and cell states, and writing to the cell's internal pixel array.  The tests I run on its functions tend to pass it a pre-initialised cell and check what pixel arrays it produces.  This way features like sixels, double height and hold graphics can be tested to the nearest pixel.  For example, in test_fillCellPixelArray_doubleHeightTop, a cell is initialised as double height and a font tile is sent to function fillCellPixelArray.  The cell's pixel array is then checked to see if it has duplicated each of the top 9 lines in the font tile.
+
+2.2.1 test_readFont
+
+This tests the font reading function by comparing the font read from m7fixed.fnt with data extracted from the same file by a different program (using the "hexdump -v" terminal command and edited with find-replace macros to make it readable by C), stored in testfiles/fontdata.h
+
+2.3 Display module testing: test_CompareScrnshotWithCurrentDisplay
+
+This is the only test for the display module.  However it is by far the most complex and comprehensive test.  It calls system("./imagediff.sh -p > testfiles/errorlog.txt").  The bash script imagediff.sh, when run with argument -p, runs the terminal command "compare -metric AE" (an imageMagick command).  This command compares two images and returns the number of pixels which differ between the two.  The two images it compares are:
+  1) testfiles/test_m7.gif, which was given to us as part of the assignment and which shows the correct output of a teletext viewer if passed file "test.m7".
+  2) The most recent file from the screenshots directory.  These files are screenshots taken automatically whenever the program is run in normal mode and with "testfiles/test.m7" as its first argument.
+
+The test passes if the number of pixels different between the two images is zero.  I have verified that the pixel counts are correct (running the imagediff.sh script with no arguments produces a PNG diff image, which has white pixels where the two images are the same and red pixels where they differ.  I have then used Adobe Photoshop to count the number of red pixels, which returned the same result as that returned by imagediff.sh -p.  The diff image can also be verified visually to see that it doesn't miss any differences).
+
+This function also tests the fontwriter program, which I wrote to create sixel fonts (in separated and contiguous modes).  If these are printing to screen incorrectly, the test will fail.
+
+One potential problem with this test is that I am unsure of the effects of uploading on SAFE on the method used by the bash script to find the most recent screenshot - if the test fails this is probably the cause.  This can be fixed by simply running the main program with "testfiles/test.m7" as argument 1 (and having the correct file in that location).
+
+3. File Documentation
+
+In this section I will cover the uses of some of the files included in this project.
+
+testfiles/badfile.m7:
+An edited version of testfile.m7 which is now less than 1000 bytes long.  It is used to test whether or not the readCodesFromFile function rejects it as input.
+
+testfiles/errorlog.txt:
+When compiled in test mode, functions which would normally print to stderr (and potentially call exit) instead print the error string (and a string indicating whether they would have tried to exit or not) to this file.  Some tests check its contents.  It is cleared after each test is run. (see section 1.2)
+
+testfiles/fontdata.h:
+This contains a 2D array of 16-bit unsigned integers read from m7fixed.fnt using the "hexdump -v" terminal command and edited using find-replace macros.  It is compared with the 2D array generated by the readFont function in test function test_readFont (see section 2.2.1 above).
+
+testfiles/test_m7.gif,
+docs/diff_DD-MM-YY_HH-MM-SS.png, 
+imagediff.sh, 
+and the screenshots directory:
+test_m7.gif is compared with the latest screenshot generated automatically (whenever the program is run in normal mode with test.m7 as its input).  The comparison is done by the bash script imagediff.sh.  It uses the imageMagick command "compare".  The script is called by the test function test_CompareScrnshotWithCurrentDisplay (see section 2.3 above).  When the script is passed the argument -p, it returns the number of different pixels between the two images.  If this number is 0, the test passes.  If the script is run with no arguments, it generates a diff image with a timestamp and in PNG format, and stores it in the docs directory.  The pixels of these diff images are white wherever the two compared images were the same, and are red wherever they were different.  They provide visual documentation of development progress.
+
+Note: although the function dispTakeScreenshot produces .BMP files, I have converted these to .PNG to lower the overall filesize of my submission.
+
+testfiles/testfiledata.h:
+This contains a 2D array of 8-bit unsigned integers read from test.m7 using the Linux terminal command "xxd -i" and edited using find-replace macros.  It is compared with the output from the readCodesFromFile function in the test function test_readCodesFromFile (see section 2.1.1 above).
+
+4. Bugs found
+
+A list of bugs found / created during development, in order of date fixed:
+
+06/01/16 -Control codes for release and hold graphics were setting the inverse states.
+10/01/16 -No blast-through text.
+10/01/16 -Sixel tiles were all horizontally inverted.
+10/01/16 -Separate sixels were one pixel too tall.
+13/01/16 -Hold graphics not storing the contiguousity/separateness of the last graphics cell.
+19/01/16 -The hold graphics char was not being reset to space after a change in display or height mode.
+24/01/16 -Hold graphics could hold alphanumeric font tiles.
+
+(all known bugs have been fixed)
+
+See the screenshots in the screenshots directory for a visual history of the state
+of development.

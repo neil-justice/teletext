@@ -1,0 +1,96 @@
+DEVLOG
+
+MON 21/12/15
+Started planning.  Considered implementing the display as an array of cells with properties like holdGraphics = on, and so on.  there would also be a current state struct.
+
+TUES 22/12/15
+Started planning testing approach.  Initially, I plan to implement black box unit tests in plain C, switching over to a unit testing framework (probably CUnit) if the test process starts to need more organisation, for example if I need mocking abilities, multiple suite functionality, and so on.  As it is, such programs provide what seems like far too much functionality for my needs.  I investigated minimalist units like MinUnit (http://www.jera.com/techinfo/jtns/jtn002.html), which is 4 lines of C code - but if I were to use such a small framework I may as well do it myself.
+
+WEDS 23/12/15
+wrote the test framework.  functions:
+- int runAllTests(void)
+- void runTest(testTracker *allTests, char *testIdentifier, test t)
+(test is a typedef'd function pointer, and testTracker is a struct)
+
+wrote 2 tests for a file opening function.
+ran into the following 2 problems: 
+- how to redirect stdout or stderr during testing (easier)
+- how to test a branch where a function should call exit() without exiting the testing process. (harder)
+Apparently check (the testing framework) solves this by running the tests in a separate process.  But forking looks difficult and not very portable.
+Potential solution: use -D in makefile to redirect exit calls to a dummy function.
+cons: have to recompile for testing.
+
+THURS 24/12/15
+made a throwError function which is replaced with a different function if TESTING == 1.  The dummy function does not call exit or write to stderr, solving both problems at once.  instead it writes to a file, which can then be checked in tests to see if the function fired properly.  Not sure whether to call it a mock, a dummy, or a stub, or something else entirely.
+
+MON 04/01/16
+finished the throwError stub function and wrote tests for checkArgs().  To avoid a circular dependency in the module dependencies, made an error.c and error.h near the bottom of the dependency list.  throwError and the testing version of it are defined here, so they can be called by other modules, since the test module is inserted at the top of the ladder when compiling in test mode (so that it can call functions from anywhere in the program).
+
+wrote test for readCodesFromFile().  Found bug in my use of modulus to break up the 1D array passed from fread into a 2D array.
+
+TUES 05/01/16
+wrote tests for most of the switchboards which translate control codes into cell properties. also added a test for opening a bad file (eg != 1000 bytes). (test currently fails)
+
+WEDS 06/01/16
+refactored module dependencies - is now:
+(test)-teletext-display-input-error-base
+refactored the state struct so that there is no longer a loadBg member which is switched on when the newBackground controlCode is sent, and then immediately off afterwards - this was totally pointless.  BgColour alone is enough.
+finished writing tests for the switchboards.  
+Found a bug in the hold mode switch - the control codes for release and hold graphics were setting the inverse states
+Started writing tests for setMatrixState.  
+
+THURS 07/01/16
+started tests for display module - where possible with unit testing, anyway.  wrote test for dispReadFont.  Most of the other functions will have to be tested visually.  thinking about making an image comparison thing?  
+got all display functionality except doubleHeight, Graphics modes, and hold graphics working.
+
+FRI 08/01/16
+wrote dispTakeScreenshot().  Now whenever the program is run in non-testing mode it takes a screenshot and saves it (with timestamp) to testfiles.  Then you can run this command (if imageMagick is installed): 
+compare testfiles/test_m7.gif testfiles/screenshot_08-01-16_10-50-30.bmp -compose src testfiles/diff.png
+wrote imagediff.sh to automatically produce a diff of the most recent screenshot to m7_test.gif.  the diff is a timestamped png stored in the testfiles dir.
+added -p command to imagediff.sh, which doesnt produce a diff image, instead returing a count of the pixels which differ between the 2 imafge
+Wrote test_CompareScrnshotWithCurrentDisplay(), which uses system() to call imagediff.sh -p and redirects its output to the normal errorlog, where it is checked.  I've verified in photoshop that it correctly counts the number of different pixels between the known good screenshot provided with the assignment and the latest screenshot (taken automatically whenever the non-test mode program is run, as long as test.m7 is given as input).
+
+SAT 09/01/16
+continued work on imagediff.sh.  added possibility for a test to return 'error' (=2) as well as fail or pass.  right now this functionality is only used by test_CompareScrnshotWithCurrentDisplay(), which returns error if the system() function call doesnt return 0, or if fscanf doesnt find a valid int in errorlog.txt (representing pixel count, written by the script).
+
+SUN 10/01/16
+wrote the standalone program fontwriter.c, which creates fonts for graphics modes.  got it working for contiguous graphics.  separated should not be very difficult.  (though will require a refactor of state struct - i'm thinking that displaymode and graphicsmode need merging).
+refactored the state struct - now have one enum displayMode { alphanumeric, contiguous, separate }.
+Had several false starts
+ - first attempt, blast-through text was overwritten.
+ - all sixels were in the wrong column, too (i.e. mirrored horizontally)
+ - separate sixels were one pixel too tall
+ 
+WED 13/01/16
+Refactored double height and char SDL code.  Created new struct - fontrect, used to reference which part of a character to draw (i.e whole thing, bottom half, top half).  could probably be used to draw wierd ratios too...
+Implemented hold graphics display code.  Not totally correct yet, though: 
+- at http://www.bbcbasic.co.uk/tccgen/manual/tcgen2.html it says "The held graphics character is displayed in the same contiguous/separated mode as when it was first displayed."  Mine does not do this. (now does)
+- "If there has been a change in the text/graphics mode or the normal/double-height mode since the last graphics character was displayed, the held graphics character is cleared and control codes once again display as spaces."  This seems to say not (as I first thought) that hold graphics is RELEASED by changes in graphics mode/doubleheight (especially because the rainbow doesnt work if this is the case) - but that the held CHARACTER is reset to a space.  so if it changes between alpha and graphics or single and double, then the char is reset to a space.
+- Have now fixed hold graphics so that it displays in the same mode as when it was first displayed
+- still need to sort out 2nd issue.
+
+Program now passing all tests (finally).  Barring refactoring, part 1 now complete.  Testing also nearly complete.
+
+TUES 19/01/16
+-added fontwriter to makefile
+-renamed input module to state
+-recombined the separate switch functions (was pointless to split them up)
+-refactored code, creating new module cell.  Now each struct cell contains an 16*18 bit array, which is a bitmap of the actual char to print (eg, double height, hold graphics, sixels are all already sorted).  This moved a lot of logic out of the display module, which is good, and should open up more testing options (testing actual contents of the char array).
+-added final holdgraphics functionality - now it resets the held char to a space if display mode or height changes (though I need to think of a way to test this, because it isnt a situation which ocurrs in any of the m7 files)
+
+WED 20/01/16
+-started work on the extension.  hoping to get an m7 file editor working in time.
+
+SAT 23/01/16
+-got cursor movement with arrow keys working
+-added popup message functionality
+-added basic editing ability (graphical char displayed will be inserted into the cellmatrix) no delete/backspace/undo/paste yet.  no control code stuff yet.
+-added control code name popup when cursor is over control code
+-added control code choice menu (enter key to enter, esc to exit) - not yet interactive though.
+-got menu choices working! basic functionality now all implemented (except saving).  
+next steps are to make pretty, add undo/paste etc, make prompt which says to press enter
+
+SUN 24/01/16
+-refactored extension
+-stopped hold graphics also holding alphanumeric tiles
+-added cell module tests

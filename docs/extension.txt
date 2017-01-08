@@ -1,0 +1,20 @@
+Extension: Teletext file editor.
+
+Compile the extension using the command "make ext" from the main program directory.  This replaces the teletext module with the extension tree.  It results in the following module dependency tree:
+
+[NEW: extension--extdisplay--logic--event--init--utility] --display--cell--state--error--base
+
+The extension executable is run in exactly the same way as the normal executable.  Pass it one argument, which should be a binary file of exactly one thousand bytes.  This file is then rendered to the screen as teletext.  
+
+The extension allows the user to edit the files loaded as well as view them.  It has the following features:
+-- The cursor may be moved using the arrow keys or by clicking the mouse.  If the currently selected cell contains a control code, an information popup is displayed in the bottom left.  This popup moves out of the way of the cursor if necessary.
+-- Typing printable characters will overwrite the currently selected cell's code, and moves the cursor right.
+-- pressing [ENTER] brings up the control code menu, from which a control code can be chosen to fill the currently selected cell's code.  The control codes can be selected with the up or down arrows or the mouse.  The code can be selected by clicking anywhere on the label or the cursor area.  pressing [ENTER] again inserts the selected control code.  Pressing [ESC] exits the menu.
+-- pressing [BACKSPACE] overwrites the currently selected cell's code with a space, and moves the cursor left.
+-- pressing [DELETE] overwrites the currently selected cell's code with a space.
+-- pressing [ESC] exits the program unless a menu is open, in which case it exits the menu.
+-- pressing [CTRL + v] pastes the clipboard contents into the cell and the cells following, until the end of the line is reached.
+-- pressing [CTRl + z] will undo the last changed control code, saving up to 50 actions.  It is implemented using a stack.
+-- pressing [CTRL + s] opens the save dialog, where a filename can be typed to be written to. Pre-existing files will not be overwritten.  The resulting file can be loaded using the normal program or the extension program.
+
+The menu system is implemented as a Finite State Machine.  
